@@ -10,8 +10,8 @@ contract MyERC20 is ERC20,Ownable{
     constructor(string memory name_,string memory symbol_) ERC20(name_,symbol_){
     }
 
-    function mint(address receiver,uint256 mount) public onlyOwner{
-        super._mint(receiver,mount);
+    function mint(address receiver,uint256 amount) public onlyOwner{
+        super._mint(receiver,amount);
         _decimals = super.decimals();
     }
     function decimals() public view virtual override returns (uint8) {

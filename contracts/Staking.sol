@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title StakingContract
  * @dev Users stake a token and earn reward in the same token. Owner can withdraw any amount of token and change ownership.
  */
 contract StakingContract is Ownable {
+    using SafeERC20 for IERC20;
     IERC20 public immutable token;
 
     struct StakeInfo {
@@ -19,17 +22,25 @@ contract StakingContract is Ownable {
 
     mapping(address => StakeInfo) public stakes;
 
-    uint256 public totalStaked;
+    uint256 public totalStaked;                                 // Total amount staked
+    uint256 public totalClaimedReward;                          // Total amount of claimed reward
+    bool    public stakePaused;                                // Pause stake
+    uint256 public stakeEndTime; // Stake end time,after this time, there will be no rewards for stake,0 means no end time.
     uint256 public constant SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
+    uint256 public constant ONE_MONTH = 30 * 24 * 60 * 60;
     uint256 public constant AAR = 8e16; // 8% annual rate, scaled by 1e18
 
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount, uint256 reward);
     event OwnerWithdraw(address indexed owner, uint256 amount);
+    event PauseStake(address indexed owner, bool pause);
+    event SetNewEndTime(address indexed owner, uint256 endTime);
 
     constructor(address _token) {
         require(_token != address(0), "Zero address");
         token = IERC20(_token);
+        stakePaused = false;
+        stakeEndTime = 0;
     }
 
     modifier updateReward(address account) {
@@ -43,7 +54,8 @@ contract StakingContract is Ownable {
     /// @notice Stake tokens to earn rewards. Multiple stakes are allowed.
     function stake(uint256 amount) external updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
-        token.transferFrom(msg.sender, address(this), amount);
+        require(stakePaused == false, "Stake paused");
+        token.safeTransferFrom(msg.sender, address(this), amount);
         stakes[msg.sender].amount += amount;
         totalStaked += amount;
         emit Staked(msg.sender, amount);
@@ -54,7 +66,17 @@ contract StakingContract is Ownable {
         StakeInfo memory info = stakes[account];
         uint256 userReward = info.rewardDebt;
         if (info.amount > 0) {
-            uint256 delta = block.timestamp - info.lastStakedTime;
+            uint256 currentTime = block.timestamp;
+            uint256 rewardEndTime = 0;
+            if(stakeEndTime == 0) {
+                rewardEndTime = currentTime;
+            } else {
+                rewardEndTime = Math.min(currentTime, stakeEndTime);
+            }
+            uint256 delta = 0;
+            if(rewardEndTime >= info.lastStakedTime) {
+                delta =  rewardEndTime - info.lastStakedTime;
+            }
             // reward = amount * AAR * delta / SECONDS_PER_YEAR / 1e18
             userReward += (info.amount * AAR * delta) / (SECONDS_PER_YEAR * 1e18);
         }
@@ -71,8 +93,9 @@ contract StakingContract is Ownable {
         info.amount = 0;
         info.rewardDebt = 0;
         totalStaked -= amount;
+        totalClaimedReward += reward;
 
-        token.transfer(msg.sender, amount + reward);
+        token.safeTransfer(msg.sender, amount + reward);
 
         emit Unstaked(msg.sender, amount, reward);
     }
@@ -80,8 +103,33 @@ contract StakingContract is Ownable {
     /// @notice Owner can withdraw a custom amount of tokens from the contract.
     function ownerWithdraw(uint256 amount) external onlyOwner {
         require(amount > 0, "Amount must be > 0");
-        require(token.balanceOf(address(this)) >= amount, "Insufficient contract balance");
-        token.transfer(owner(), amount);
+        require( stakePaused == true, "Stake should paused");
+        uint256 balance = token.balanceOf(address(this));
+        require( balance >= amount, "Insufficient contract balance");
+        uint256 available = 0;
+        uint256 frozen = totalStaked + (totalStaked * AAR * ONE_MONTH) / (SECONDS_PER_YEAR * 1e18); // Assume that it is impossible to transfer all staking users’ income for one month
+        if(balance > frozen) {
+            available = balance - frozen;
+        }
+        require( amount <= available, "Only part of the balance can be withdrawn");
+        token.safeTransfer(owner(), amount);
         emit OwnerWithdraw(owner(), amount);
+    }
+
+    /// @notice Owner can pause stake.
+    function pauseStake(bool pause) external onlyOwner {
+        stakePaused = pause;
+        emit PauseStake(owner(), pause);
+    }
+
+    /// @notice Owner can set stake end time.
+    function setStakeEndTime(uint256 endTime) external onlyOwner {
+        if(endTime == 0){
+            require(stakePaused == false, "Need to start stake first.");
+        } else {
+            require(stakePaused == true, "Need to pause stake first.");
+        }
+        stakeEndTime = endTime;
+        emit SetNewEndTime(owner(), endTime);
     }
 }

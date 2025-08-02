@@ -35,6 +35,7 @@ describe("StakingContract", function () {
   });
 
   it("Owner can withdraw custom amount", async function () {
+    await staking.pauseStake(true);
     const contractBalance = await token.balanceOf(stakingAddress);
     const withdrawAmount = contractBalance/2n;
 
