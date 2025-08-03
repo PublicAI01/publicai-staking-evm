@@ -15,7 +15,7 @@ describe("StakingContract", function () {
     tokenAddress = await token.getAddress();
     // Deploy StakingContract
     const Staking = await ethers.getContractFactory("StakingContract");
-    staking = await Staking.deploy(tokenAddress);
+    staking = await Staking.deploy(tokenAddress, ethers.parseEther("1"));
 
     stakingAddress = await staking.getAddress();
     // Fund contract with enough reward token
@@ -36,8 +36,7 @@ describe("StakingContract", function () {
 
   it("Owner can withdraw custom amount", async function () {
     await staking.pauseStake(true);
-    const contractBalance = await token.balanceOf(stakingAddress);
-    const withdrawAmount = contractBalance/2n;
+    const withdrawAmount = ethers.parseEther("1");
 
     const before = await token.balanceOf(owner.address);
     await staking.ownerWithdraw(withdrawAmount);

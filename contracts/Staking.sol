@@ -26,8 +26,8 @@ contract StakingContract is Ownable {
     uint256 public totalClaimedReward;                          // Total amount of claimed reward
     bool    public stakePaused;                                // Pause stake
     uint256 public stakeEndTime; // Stake end time,after this time, there will be no rewards for stake,0 means no end time.
+    uint256 public totalReward;                          // Total amount of reward
     uint256 public constant SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
-    uint256 public constant ONE_MONTH = 30 * 24 * 60 * 60;
     uint256 public constant AAR = 8e16; // 8% annual rate, scaled by 1e18
 
     event Staked(address indexed user, uint256 amount);
@@ -35,12 +35,15 @@ contract StakingContract is Ownable {
     event OwnerWithdraw(address indexed owner, uint256 amount);
     event PauseStake(address indexed owner, bool pause);
     event SetNewEndTime(address indexed owner, uint256 endTime);
+    event SetTotalReward(address indexed owner, uint256 totalReward);
 
-    constructor(address _token) {
+    constructor(address _token, uint256 _totalReward) {
         require(_token != address(0), "Zero address");
+        require(_totalReward > 0, "Total reward should gt 0");
         token = IERC20(_token);
         stakePaused = false;
         stakeEndTime = 0;
+        totalReward = _totalReward;
     }
 
     modifier updateReward(address account) {
@@ -93,11 +96,21 @@ contract StakingContract is Ownable {
         info.amount = 0;
         info.rewardDebt = 0;
         totalStaked -= amount;
-        totalClaimedReward += reward;
+        uint256 afterTotalClaimedReward = totalClaimedReward + reward;
+        uint256 claimReward = 0;
+        // The user can only claim the portion that does not exceed the total reward.
+        if(afterTotalClaimedReward >= totalReward) {
+            if(totalReward >= totalClaimedReward) {
+                claimReward = totalReward - totalClaimedReward;
+            }
+        } else {
+            claimReward = reward;
+        }
+        totalClaimedReward += claimReward;
 
-        token.safeTransfer(msg.sender, amount + reward);
+        token.safeTransfer(msg.sender, amount + claimReward);
 
-        emit Unstaked(msg.sender, amount, reward);
+        emit Unstaked(msg.sender, amount, claimReward);
     }
 
     /// @notice Owner can withdraw a custom amount of tokens from the contract.
@@ -107,7 +120,10 @@ contract StakingContract is Ownable {
         uint256 balance = token.balanceOf(address(this));
         require( balance >= amount, "Insufficient contract balance");
         uint256 available = 0;
-        uint256 frozen = totalStaked + (totalStaked * AAR * ONE_MONTH) / (SECONDS_PER_YEAR * 1e18); // Assume that it is impossible to transfer all staking users’ income for one month
+        uint256 frozen = totalStaked;
+        if(totalReward >= totalClaimedReward) {
+            frozen += totalReward - totalClaimedReward;
+        }
         if(balance > frozen) {
             available = balance - frozen;
         }
@@ -131,5 +147,12 @@ contract StakingContract is Ownable {
         }
         stakeEndTime = endTime;
         emit SetNewEndTime(owner(), endTime);
+    }
+
+    /// @notice Owner can set total reward.
+    function setTotalReward(uint256 _totalReward) external onlyOwner {
+        require(_totalReward > 0, "Total reward should gt 0");
+        totalReward = _totalReward;
+        emit SetTotalReward(owner(), _totalReward);
     }
 }
