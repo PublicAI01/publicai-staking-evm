@@ -86,6 +86,14 @@ contract StakingContract is Ownable {
         return userReward;
     }
 
+    /// @notice View function to get the user's current stake info.
+    function getStakeInfo(address account) public view returns (StakeInfo memory) {
+        StakeInfo memory info = stakes[account];
+        uint256 userReward = earned(account);
+        info.rewardDebt = userReward;
+        return info;
+    }
+
     /// @notice Unstake all and claim all rewards.
     function unstake() external updateReward(msg.sender) {
         StakeInfo storage info = stakes[msg.sender];
