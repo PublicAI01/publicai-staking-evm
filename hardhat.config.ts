@@ -4,7 +4,7 @@ import dotenv from 'dotenv'
 dotenv.config()
 
 const config: HardhatUserConfig = {
-  defaultNetwork: "bscTestnet",
+  defaultNetwork: "hardhat",
   solidity: {
     compilers: [
       {
@@ -29,6 +29,13 @@ const config: HardhatUserConfig = {
     bscTestnet: {
       url: process.env.EVM_RPC!,
       chainId: 97,
+      accounts: [
+        process.env.PRIVATE!,
+      ]
+    },
+    bsc: {
+      url: process.env.EVM_RPC!,
+      chainId: 56,
       accounts: [
         process.env.PRIVATE!,
       ]

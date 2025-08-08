@@ -18,6 +18,7 @@ contract StakingContract is Ownable {
         uint256 amount;         // User's staked amount
         uint256 rewardDebt;     // Accumulated reward
         uint256 lastStakedTime; // Last update time
+        uint256 firstStakeTime;    // Time of first stake
     }
 
     mapping(address => StakeInfo) public stakes;
@@ -27,8 +28,12 @@ contract StakingContract is Ownable {
     bool    public stakePaused;                                // Pause stake
     uint256 public stakeEndTime; // Stake end time,after this time, there will be no rewards for stake,0 means no end time.
     uint256 public totalReward;                          // Total amount of reward
+    uint256 public stakeStartTime;                                    // Start time of stake
+    uint256 public lockDuration;                                       // Lock duration
     uint256 public constant SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
+    uint256 public constant WEEK = 7 * 24 * 60 * 60;
     uint256 public constant AAR = 8e16; // 8% annual rate, scaled by 1e18
+    uint256[5] public AAR_EARLY = [500e16, 400e16, 300e16, 200e16, 100e16];
 
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount, uint256 reward);
@@ -36,6 +41,7 @@ contract StakingContract is Ownable {
     event PauseStake(address indexed owner, bool pause);
     event SetNewEndTime(address indexed owner, uint256 endTime);
     event SetTotalReward(address indexed owner, uint256 totalReward);
+    event SetLockDuration(address indexed owner, uint256 lockDuration);
 
     constructor(address _token, uint256 _totalReward) {
         require(_token != address(0), "Zero address");
@@ -44,12 +50,17 @@ contract StakingContract is Ownable {
         stakePaused = false;
         stakeEndTime = 0;
         totalReward = _totalReward;
+        stakeStartTime = block.timestamp;
+        lockDuration = 2 * WEEK;
     }
 
     modifier updateReward(address account) {
         if (account != address(0)) {
             stakes[account].rewardDebt = earned(account);
             stakes[account].lastStakedTime = block.timestamp;
+            if(stakes[account].firstStakeTime == 0) {
+                stakes[account].firstStakeTime = block.timestamp;
+            }
         }
         _;
     }
@@ -76,12 +87,46 @@ contract StakingContract is Ownable {
             } else {
                 rewardEndTime = Math.min(currentTime, stakeEndTime);
             }
-            uint256 delta = 0;
+            uint256 start_time = 0;
             if(rewardEndTime >= info.lastStakedTime) {
-                delta =  rewardEndTime - info.lastStakedTime;
+                start_time =  info.lastStakedTime;
+            } else {
+                start_time = rewardEndTime;
             }
             // reward = amount * AAR * delta / SECONDS_PER_YEAR / 1e18
-            userReward += (info.amount * AAR * delta) / (SECONDS_PER_YEAR * 1e18);
+            uint256 reward = 0;
+            uint256 reward_duration = 0;
+            for (uint i = 0; i < AAR_EARLY.length; i++) {
+                uint256 aar_start_at = stakeStartTime + i * WEEK;
+                uint256 aar_end_at = stakeStartTime + (i + 1) * WEEK;
+                if(rewardEndTime < aar_start_at || start_time >= aar_end_at) {
+                    continue;
+                }
+                if(start_time >= aar_start_at) {
+                    if(rewardEndTime <= aar_end_at) {
+                        reward_duration = rewardEndTime - start_time;
+                    } else {
+                        reward_duration = aar_end_at - start_time;
+                    }
+                } else {
+                    if(rewardEndTime <= aar_end_at) {
+                        reward_duration = rewardEndTime - aar_start_at;
+                    } else {
+                        reward_duration = aar_end_at - aar_start_at;
+                    }
+                }
+                reward += info.amount * AAR_EARLY[i] * reward_duration;
+            }
+            uint256 last_interval_end = stakeStartTime + (AAR_EARLY.length * WEEK);
+            if(rewardEndTime >= last_interval_end) {
+                if(start_time >= last_interval_end) {
+                    reward_duration = rewardEndTime - start_time;
+                } else {
+                    reward_duration = rewardEndTime - last_interval_end;
+                }
+                reward += info.amount * AAR * reward_duration;
+            }
+            userReward += reward / (SECONDS_PER_YEAR * 1e18);
         }
         return userReward;
     }
@@ -103,6 +148,7 @@ contract StakingContract is Ownable {
 
         info.amount = 0;
         info.rewardDebt = 0;
+
         totalStaked -= amount;
         uint256 afterTotalClaimedReward = totalClaimedReward + reward;
         uint256 claimReward = 0;
@@ -116,6 +162,12 @@ contract StakingContract is Ownable {
         }
         totalClaimedReward += claimReward;
 
+        uint256 current_time = block.timestamp;
+        if(current_time < info.firstStakeTime + lockDuration) {
+            claimReward = 0;
+        }
+        info.firstStakeTime = 0;
+        info.lastStakedTime = 0;
         token.safeTransfer(msg.sender, amount + claimReward);
 
         emit Unstaked(msg.sender, amount, claimReward);
@@ -162,5 +214,12 @@ contract StakingContract is Ownable {
         require(_totalReward > 0, "Total reward should gt 0");
         totalReward = _totalReward;
         emit SetTotalReward(owner(), _totalReward);
+    }
+
+    /// @notice Owner can set lock duration.
+    function setLockDuration(uint256 _lockDuration) external onlyOwner {
+        require(_lockDuration > 0, "Lock duration should gt 0");
+        lockDuration = _lockDuration;
+        emit SetLockDuration(owner(), _lockDuration);
     }
 }
