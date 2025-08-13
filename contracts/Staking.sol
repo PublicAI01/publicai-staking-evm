@@ -162,12 +162,14 @@ contract StakingContract is Ownable {
         } else {
             claimReward = reward;
         }
-        totalClaimedReward += claimReward;
 
         uint256 current_time = block.timestamp;
         if(current_time < info.firstStakeTime + lockDuration) {
             claimReward = 0;
         }
+
+        totalClaimedReward += claimReward;
+
         info.firstStakeTime = 0;
         info.lastStakedTime = 0;
         token.safeTransfer(msg.sender, amount + claimReward);
