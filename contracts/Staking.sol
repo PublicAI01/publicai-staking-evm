@@ -28,12 +28,14 @@ contract StakingContract is Ownable {
     bool    public stakePaused;                                // Pause stake
     uint256 public stakeEndTime; // Stake end time,after this time, there will be no rewards for stake,0 means no end time.
     uint256 public totalReward;                          // Total amount of reward
-    uint256 public stakeStartTime;                                    // Start time of stake
+    uint256 public immutable stakeStartTime;                                    // Start time of stake
     uint256 public lockDuration;                                       // Lock duration
     uint256 public constant SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
     uint256 public constant WEEK = 7 * 24 * 60 * 60;
     uint256 public constant AAR = 8e16; // 8% annual rate, scaled by 1e18
     uint256[5] public AAR_EARLY = [500e16, 400e16, 300e16, 200e16, 100e16];
+    uint256 public constant MAX_TOTAL_REWARD = 100000000e18;
+    uint256 public constant MAX_LOCK_DURATION = 4*WEEK;
 
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount, uint256 reward);
@@ -68,7 +70,7 @@ contract StakingContract is Ownable {
     /// @notice Stake tokens to earn rewards. Multiple stakes are allowed.
     function stake(uint256 amount) external updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
-        require(stakePaused == false, "Stake paused");
+        require(!stakePaused, "Stake paused");
         token.safeTransferFrom(msg.sender, address(this), amount);
         stakes[msg.sender].amount += amount;
         totalStaked += amount;
@@ -176,7 +178,7 @@ contract StakingContract is Ownable {
     /// @notice Owner can withdraw a custom amount of tokens from the contract.
     function ownerWithdraw(uint256 amount) external onlyOwner {
         require(amount > 0, "Amount must be > 0");
-        require( stakePaused == true, "Stake should paused");
+        require( stakePaused, "Stake should paused");
         uint256 balance = token.balanceOf(address(this));
         require( balance >= amount, "Insufficient contract balance");
         uint256 available = 0;
@@ -201,9 +203,9 @@ contract StakingContract is Ownable {
     /// @notice Owner can set stake end time.
     function setStakeEndTime(uint256 endTime) external onlyOwner {
         if(endTime == 0){
-            require(stakePaused == false, "Need to start stake first.");
+            require(!stakePaused, "Need to start stake first.");
         } else {
-            require(stakePaused == true, "Need to pause stake first.");
+            require(stakePaused, "Need to pause stake first.");
         }
         stakeEndTime = endTime;
         emit SetNewEndTime(owner(), endTime);
@@ -212,6 +214,7 @@ contract StakingContract is Ownable {
     /// @notice Owner can set total reward.
     function setTotalReward(uint256 _totalReward) external onlyOwner {
         require(_totalReward > 0, "Total reward should gt 0");
+        require(_totalReward <= MAX_TOTAL_REWARD, "Total reward should le MAX_TOTAL_REWARD");
         totalReward = _totalReward;
         emit SetTotalReward(owner(), _totalReward);
     }
@@ -219,6 +222,7 @@ contract StakingContract is Ownable {
     /// @notice Owner can set lock duration.
     function setLockDuration(uint256 _lockDuration) external onlyOwner {
         require(_lockDuration > 0, "Lock duration should gt 0");
+        require(_lockDuration <= MAX_LOCK_DURATION, "Cannot exceed MAX_LOCK_DURATION");
         lockDuration = _lockDuration;
         emit SetLockDuration(owner(), _lockDuration);
     }
